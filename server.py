@@ -3,54 +3,77 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 import os
+import boto3
 
 app = Flask(__name__)
 
-# Load YOLO model once at startup
-model = YOLO("escooter_model.pt")   # your trained model
 
+# model = YOLO("escooter_model.pt")
 
-def count_scooters(image_path):
-    image = cv2.imread(image_path)
-    results = model(image, conf=0.5, verbose=False)
+dynamodb = boto3.resource('dynamodb', region_name='us-west-1')
+table = dynamodb.Table('Parking_Count')
 
-    escooter_count = 0
-    bicycle_count = 0
+def update_dynamodb(location_id, count):
+    try:
+        response = table.update_item(Key={'location_id': location_id},UpdateExpression='SET #count >
+        print(f"Successfully updated DynamoDB: {response}")
+        return response
+    except Exception as e:
+        print(f"Error updating DynamoDB: {str(e)}")
+        raise
 
-    for result in results:
-        boxes = result.boxes
+# def count_scooters(image_path):
+#     image = cv2.imread(image_path)
+#     results = model(image, conf=0.5, verbose=False)
 
-        for box in boxes:
-            class_id = int(box.cls[0])
-            class_name = model.names[class_id]
+#     escooter_count = 0
+#     bicycle_count = 0
 
-            print(class_name)
-            if class_name == 'electric_scooter':
-                escooter_count += 1
-            elif class_name == 'bicycle':
-                bicycle_count += 1
+#     for result in results:
+#         boxes = result.boxes
 
-    return escooter_count, bicycle_count
+#         for box in boxes:
+#             class_id = int(box.cls[0])
+#             class_name = model.names[class_id]
 
+#             print(class_name)
+#             if class_name == 'electric_scooter':
+#                 escooter_count += 1
+#             elif class_name == 'bicycle':
+#                 bicycle_count += 1
 
-@app.route("/count", methods=["POST"])
+#     return escooter_count, bicycle_count
+
+@app.route("/upload", methods=["POST"])
 def count_endpoint():
-    if "image" not in request.files:
+    print(request.data)
+    if "location_id" not in request.args:
+        print("Location ID not found!")
+        return jsonify({"error": "No location_id specified. Add to header."}), 400
+    if not request.data:
+        print("Image file not found!")
         return jsonify({"error": "No image uploaded"}), 400
 
-    img_file = request.files["image"]
+    location_id = request.args["location_id"]
+    img_bytes = request.data
+
+    print(location_id)
 
     # Save temporarily
-    image_path = "uploaded.jpg"
-    img_file.save(image_path)
+    image_path = f"uploaded_{location_id}.jpg"
+    with open(image_path, "wb") as f:
+        f.write(img_bytes)
 
-    # Run detection
-    escooters, bicycles = count_scooters(image_path)
+    print(f"Image saved to {image_path}")
+
+    # # Run detection
+    # escooters, bicycles = count_scooters(image_path)
+
+    update_dynamodb(location_id, 2)
 
     return jsonify({
-        "electric_scooters": escooters,
-        "bicycles": bicycles
-    })
+        "message": "Uploaded to DynamoDB!"
+    }), 200
 
 
 @app.route("/", methods=["GET"])
@@ -60,3 +83,4 @@ def home():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
