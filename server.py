@@ -92,6 +92,102 @@ def count_endpoint():
         "message": "Uploaded to DynamoDB!"
     }), 200
 
+@app.route('/fetch', methods=['GET'])
+def get_count():
+    try:
+        response = table.scan()
+
+        locations = []
+        for item in response.get('Items', []):
+            total_spots = item.get('total_spots', 20)
+            count = item.get('count', 0)
+
+            locations.append({
+                "location_id": item['location_id'],
+                "location_name": item.get('location_name', 'Parking Location'),
+                "count": count,
+                "total_spots": total_spots,
+                "available_spots": total_spots - count,
+                "last_updated": item.get('last_updated', None)
+            })
+
+        return jsonify({
+            "success": True,
+            "total_locations": len(locations),
+            "locations": locations
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+    
+@app.route("/change_total_spots", methods=["POST"])
+def change_total_spots():
+    if "location_id" not in request.args:
+        return jsonify({"error": "No location_id specified. Add to header."}), 400
+    if "new_total_spots" not in request.args:
+        return jsonify({"error": "No new_total_spots specified. Add to header."}), 400
+
+    location_id = request.args["location_id"]
+    try:
+        new_total_spots = int(request.args["new_total_spots"])
+    except ValueError:
+        return jsonify({"error": "new_total_spots must be an integer."}), 400
+
+    try:
+        response = table.update_item(
+            Key={'location_id': location_id},
+            UpdateExpression='SET total_spots = :total_spots',
+            ExpressionAttributeValues={':total_spots': new_total_spots},
+            ReturnValues="UPDATED_NEW"
+        )
+        return jsonify({
+            "message": "total_spots updated successfully.",
+            "updated_attributes": response.get("Attributes", {})
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/new_location", methods=["POST"])
+def new_location():
+    if "location_id" not in request.args:
+        return jsonify({"error": "No location_id specified. Add to header."}), 400
+    if "location_name" not in request.args:
+        return jsonify({"error": "No location_name specified. Add to header."}), 400
+    if "total_spots" not in request.args:
+        return jsonify({"error": "No total_spots specified. Add to header."}), 400
+    if "initial_count" not in request.args:
+        initial_count = 0
+    else:
+        try:
+            initial_count = int(request.args["initial_count"])
+        except ValueError:
+            return jsonify({"error": "initial_count must be an integer."}), 400
+        
+    location_id = request.args["location_id"]
+    location_name = request.args["location_name"]
+    try:
+        total_spots = int(request.args["total_spots"])
+    except ValueError:
+        return jsonify({"error": "total_spots must be an integer."}), 400
+
+    try:
+        response = table.put_item(
+            Item={
+                'location_id': location_id,
+                'location_name': location_name,
+                'total_spots': total_spots,
+                'count': initial_count
+            }
+        )
+        return jsonify({
+            "message": "New location added successfully.",
+            "response": response
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/", methods=["GET"])
 def home():
