@@ -6,10 +6,11 @@ import os
 import boto3
 from datetime import datetime
 
+ESCOOTER_CLASS = '19'
+
 app = Flask(__name__)
 
-
-model = YOLO("escooter_model.pt")
+model = YOLO("model.pt")
 
 dynamodb = boto3.resource('dynamodb', region_name='us-west-1')
 table = dynamodb.Table('Parking_Count')
@@ -40,8 +41,7 @@ def count_scooters(image_path):
             class_id = int(box.cls[0])
             class_name = model.names[class_id]
 
-            print(class_name)
-            if class_name == 'electric_scooter':
+            if class_name == ESCOOTER_CLASS:
                 escooter_count += 1
             elif class_name == 'bicycle':
                 bicycle_count += 1
@@ -50,7 +50,6 @@ def count_scooters(image_path):
 
 @app.route("/upload", methods=["POST"])
 def count_endpoint():
-    print(request.data)
     if "location_id" not in request.args:
         print("Location ID not found!")
         return jsonify({"error": "No location_id specified. Add to header."}), 400
@@ -62,14 +61,12 @@ def count_endpoint():
     upload_to_s3 = "upload_to_s3" in request.args and request.args["upload_to_s3"].lower() == "true"
     img_bytes = request.data
 
-    print(location_id)
-
     # Save temporarily
     image_path = f"uploaded_{location_id}.jpg"
     with open(image_path, "wb") as f:
         f.write(img_bytes)
 
-    print(f"Image saved to {image_path}")
+    print(f"Image saved to S3 folder {image_path}")
 
     if upload_to_s3:
         # Upload to S3
@@ -95,10 +92,22 @@ def count_endpoint():
 @app.route('/fetch', methods=['GET'])
 def get_count():
     try:
-        response = table.scan()
+        # Check if user supplied a location_id
+        location_id = request.args.get("location_id")
 
         locations = []
-        for item in response.get('Items', []):
+
+        if location_id:
+            # Fetch only the specified location
+            response = table.get_item(Key={'location_id': location_id})
+            item = response.get('Item')
+
+            if not item:
+                return jsonify({
+                    "success": False,
+                    "error": f"Location {location_id} not found"
+                }), 404
+
             total_spots = item.get('total_spots', 20)
             count = item.get('count', 0)
 
@@ -110,6 +119,22 @@ def get_count():
                 "available_spots": total_spots - count,
                 "last_updated": item.get('last_updated', None)
             })
+
+        else:
+            # No location_id supplied → scan all
+            response = table.scan()
+            for item in response.get('Items', []):
+                total_spots = item.get('total_spots', 20)
+                count = item.get('count', 0)
+
+                locations.append({
+                    "location_id": item['location_id'],
+                    "location_name": item.get('location_name', 'Parking Location'),
+                    "count": count,
+                    "total_spots": total_spots,
+                    "available_spots": total_spots - count,
+                    "last_updated": item.get('last_updated', None)
+                })
 
         return jsonify({
             "success": True,
