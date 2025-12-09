@@ -31,22 +31,23 @@ def count_scooters(image_path):
     image = cv2.imread(image_path)
     results = model(image, conf=0.5, verbose=False)
 
-    escooter_count = 0
-    bicycle_count = 0
+    # escooter_count = 0
+    # bicycle_count = 0
 
     for result in results:
         boxes = result.boxes
+        box_count = len(boxes)
 
-        for box in boxes:
+        """ for box in boxes:
             class_id = int(box.cls[0])
             class_name = model.names[class_id]
 
             if class_name == ESCOOTER_CLASS:
                 escooter_count += 1
             elif class_name == 'bicycle':
-                bicycle_count += 1
+                bicycle_count += 1 """
 
-    return [escooter_count, bicycle_count]
+    return [box_count]
 
 @app.route("/upload", methods=["POST"])
 def count_endpoint():
@@ -81,9 +82,9 @@ def count_endpoint():
             return jsonify({"error": "Failed to upload image to S3"}), 500
 
     # Run detection
-    [escooters, bicycles] = count_scooters(image_path)
+    [vehicle_count] = count_scooters(image_path)
 
-    update_dynamodb(location_id, escooters + bicycles)
+    update_dynamodb(location_id, vehicle_count)
 
     return jsonify({
         "message": "Uploaded to DynamoDB!"
